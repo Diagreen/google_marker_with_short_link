@@ -2,3 +2,4 @@ __pycache__/
 places.csv
 *.csv
 debug.html
+debug.png

@@ -106,9 +106,10 @@ class Handler(BaseHTTPRequestHandler):
         note = form.get("note", [""])[0].strip()
 
         messages, all_ok = [], True
-        with LOCK:
+        # Playwright 동기 API는 스레드 간에 공유할 수 없으므로 요청마다 브라우저를 새로 띄운다.
+        with LOCK, marker.BrowserResolver() as resolver:
             for url in urls:
-                ok, message = marker.add(url, CSV_PATH, note=note, tag=tag)
+                ok, message = marker.add(url, CSV_PATH, note=note, tag=tag, resolver=resolver)
                 messages.append(message)
                 all_ok &= ok
         self._send(render("\n".join(messages), failed=not all_ok))
