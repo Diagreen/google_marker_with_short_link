@@ -32,6 +32,8 @@ PAGE = """<!doctype html>
   table {{ width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14px; }}
   th, td {{ border-bottom: 1px solid #ddd; padding: 6px; text-align: left; }}
   .muted {{ color: #777; }}
+  button.pv {{ margin: 0; padding: 2px 10px; font-size: 13px; }}
+  #preview iframe {{ width: 100%; height: 360px; border: 1px solid #ddd; }}
 </style>
 </head>
 <body>
@@ -48,10 +50,32 @@ PAGE = """<!doctype html>
 </form>
 {result}
 <h2>저장된 장소 {count}곳 <a href="/places.csv" class="muted" style="font-size:14px">CSV 다운로드</a></h2>
+<div id="preview" hidden>
+  <p><b id="preview-name"></b> <span class="muted" id="preview-coords"></span>
+     <span class="muted">— 핀이 해당 시설 위에 있는지 확인하세요.</span></p>
+  <iframe id="preview-map" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+</div>
 <table>
-  <tr><th>이름</th><th>태그</th><th>메모</th><th>추가일</th></tr>
+  <tr><th>이름</th><th>태그</th><th>메모</th><th>추가일</th><th>좌표 확인</th></tr>
   {rows}
 </table>
+<script>
+  function preview(btn) {{
+    var lat = btn.dataset.lat, lng = btn.dataset.lng;
+    document.getElementById("preview-name").textContent = btn.dataset.name;
+    document.getElementById("preview-coords").textContent = "(" + lat + ", " + lng + ")";
+    document.getElementById("preview-map").src =
+      "https://maps.google.com/maps?q=" + lat + "," + lng + "&z=18&hl=ko&output=embed";
+    document.getElementById("preview").hidden = false;
+  }}
+  document.querySelectorAll("button.pv").forEach(function (b) {{
+    b.addEventListener("click", function () {{ preview(b); }});
+  }});
+  if ({preview_newest}) {{
+    var first = document.querySelector("button.pv");
+    if (first) preview(first);
+  }}
+</script>
 </body>
 </html>
 """
@@ -65,21 +89,24 @@ def place_link(row: dict) -> str:
     return f"https://www.google.com/maps/search/?api=1&query={row['위도']},{row['경도']}"
 
 
-def render(result: str = "", failed: bool = False) -> bytes:
+def render(result: str = "", failed: bool = False, preview_newest: bool = False) -> bytes:
     rows = marker.load_rows(CSV_PATH)
     tags = sorted({r.get("태그", "") for r in rows} - {""})
     table = "\n".join(
         f'<tr><td><a href="{escape(place_link(r))}"'
         f' target="_blank">{escape(r["이름"])}</a></td>'
         f'<td>{escape(r.get("태그", ""))}</td><td>{escape(r.get("메모", ""))}</td>'
-        f'<td class="muted">{escape(r.get("추가일", ""))}</td></tr>'
+        f'<td class="muted">{escape(r.get("추가일", ""))}</td>'
+        f'<td><button type="button" class="pv" data-lat="{escape(r["위도"])}" data-lng="{escape(r["경도"])}"'
+        f' data-name="{escape(r["이름"])}">지도</button></td></tr>'
         for r in reversed(rows)
-    ) or '<tr><td colspan="4" class="muted">아직 없습니다.</td></tr>'
+    ) or '<tr><td colspan="5" class="muted">아직 없습니다.</td></tr>'
     html = PAGE.format(
         tag_options="".join(f'<option value="{escape(t)}">' for t in tags),
         result=f'<pre class="{"fail" if failed else ""}">{escape(result)}</pre>' if result else "",
         count=len(rows),
         rows=table,
+        preview_newest="true" if preview_newest else "false",
     )
     return html.encode("utf-8")
 
@@ -120,7 +147,8 @@ class Handler(BaseHTTPRequestHandler):
                 ok, message = marker.add(url, CSV_PATH, note=note, tag=tag, resolver=resolver)
                 messages.append(message)
                 all_ok &= ok
-        self._send(render("\n".join(messages), failed=not all_ok))
+        added = any(m.startswith("[추가]") for m in messages)
+        self._send(render("\n".join(messages), failed=not all_ok, preview_newest=added))
 
 
 def main() -> None:
