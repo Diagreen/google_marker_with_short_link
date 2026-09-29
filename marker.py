@@ -2,6 +2,7 @@
 
 import argparse
 import csv
+import html
 import re
 import sys
 import urllib.request
@@ -14,15 +15,16 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 COORD = r"(-?\d{1,3}\.\d+)"
 
 
-def resolve(url: str) -> str:
-    """단축 링크(maps.app.goo.gl 등)의 리다이렉트를 따라가 최종 URL을 반환한다."""
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+def fetch(url: str) -> tuple[str, str]:
+    """리다이렉트를 따라가 (최종 URL, 페이지 HTML)을 반환한다."""
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept-Language": "ko"})
     with urllib.request.urlopen(req, timeout=10) as resp:
         final = resp.geturl()
+        body = resp.read().decode("utf-8", errors="replace")
     # EU 등에서는 동의 페이지로 튕기는데, 원래 주소가 continue 파라미터에 들어 있다.
     if urlparse(final).netloc.startswith("consent."):
-        final = parse_qs(urlparse(final).query).get("continue", [final])[0]
-    return final
+        return fetch(parse_qs(urlparse(final).query).get("continue", [final])[0])
+    return final, body
 
 
 def parse_coords(url: str) -> tuple[float, float] | None:
@@ -44,6 +46,29 @@ def parse_coords(url: str) -> tuple[float, float] | None:
     if m:
         return float(m[1]), float(m[2])
     return None
+
+
+def parse_coords_from_html(page: str) -> tuple[float, float] | None:
+    """모바일 공유 링크처럼 URL에 좌표가 없을 때, 페이지 HTML에 박힌 좌표를 찾는다."""
+    # 미리보기 이미지(staticmap)의 center=lat,lng
+    m = re.search(rf"staticmap\?center={COORD}(?:%2C|,){COORD}", page)
+    if m:
+        return float(m[1]), float(m[2])
+    # APP_INITIALIZATION_STATE=[[[zoom,lng,lat] (경도가 먼저)
+    m = re.search(rf"APP_INITIALIZATION_STATE=\[\[\[-?[\d.]+,{COORD},{COORD}\]", page)
+    if m:
+        return float(m[2]), float(m[1])
+    return None
+
+
+def parse_name_from_html(page: str) -> str | None:
+    m = re.search(r'<meta content="([^"]*)" (?:itemprop="name"|property="og:title")', page) or \
+        re.search(r'<meta (?:itemprop="name"|property="og:title") content="([^"]*)"', page)
+    if not m:
+        return None
+    # "이름 · 주소" 형태로 오므로 앞부분만 쓴다.
+    name = html.unescape(m[1]).split(" · ")[0].strip()
+    return name if name and name != "Google Maps" else None
 
 
 def parse_name(url: str) -> str | None:
@@ -83,19 +108,26 @@ def is_duplicate(rows: list[dict], lat: float, lng: float) -> dict | None:
     return None
 
 
-def add(url: str, csv_path: Path, name: str | None, note: str) -> bool:
-    final = url if "/maps/place/" in url or "@" in url else resolve(url)
-    coords = parse_coords(final)
+def add(url: str, csv_path: Path, name: str | None, note: str, debug: bool = False) -> bool:
+    final, page = url, ""
+    coords = parse_coords(url)
+    if coords is None:
+        final, page = fetch(url)
+        coords = parse_coords(final) or parse_coords_from_html(page)
+        if debug:
+            Path("debug.html").write_text(page, encoding="utf-8")
+            print(f"[디버그] 최종 URL: {final}\n[디버그] HTML을 debug.html에 저장했습니다.")
     if coords is None:
         print(
             f"[실패] 좌표를 찾지 못했습니다: {url}\n"
             f"  최종 URL: {final}\n"
-            "  PC 브라우저에서 링크를 열고, 지도가 로드된 뒤 주소창의 URL을 복사해 다시 넣어 주세요.",
+            "  PC 브라우저에서 링크를 열고, 지도가 로드된 뒤 주소창의 URL을 복사해 다시 넣어 주세요.\n"
+            "  (--debug 옵션으로 실행하면 받은 HTML을 debug.html에 저장합니다.)",
             file=sys.stderr,
         )
         return False
     lat, lng = coords
-    name = name or parse_name(final) or f"{lat:.5f},{lng:.5f}"
+    name = name or parse_name_from_html(page) or parse_name(final) or f"{lat:.5f},{lng:.5f}"
 
     dup = is_duplicate(load_rows(csv_path), lat, lng)
     if dup:
@@ -116,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--csv", type=Path, default=Path("places.csv"), help="저장할 CSV (기본: places.csv)")
     parser.add_argument("--name", help="장소 이름 직접 지정 (링크 1개일 때만)")
     parser.add_argument("--note", default="", help="메모")
+    parser.add_argument("--debug", action="store_true", help="받은 페이지 HTML을 debug.html에 저장")
     args = parser.parse_args(argv)
 
     if args.name and len(args.urls) > 1:
@@ -124,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
     ok = True
     for url in args.urls:
         try:
-            ok &= add(url, args.csv, args.name, args.note)
+            ok &= add(url, args.csv, args.name, args.note, args.debug)
         except OSError as e:
             print(f"[실패] 링크를 열 수 없습니다: {url} ({e})", file=sys.stderr)
             ok = False
