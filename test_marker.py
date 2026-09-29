@@ -39,33 +39,16 @@ MOBILE_URL = (
     "+2+Chome-2-5+Sonezakishinchi,+Kita+Ward,+Osaka/data=!4m2!3m1!1s0x6000e6f320eaaaab:0x7c1945593b9e0795"
     "!18m1!1e1?utm_source=mstt_1&entry=gps"
 )
-MOBILE_HTML = (
-    '<meta content="와타나베카레 · 2 Chome-2-5 Sonezakishinchi" itemprop="name">'
-    '<meta content="https://maps.google.com/maps/api/staticmap?center=34.6963%2C135.4977&amp;zoom=15" itemprop="image">'
-    ";window.APP_INITIALIZATION_STATE=[[[3000.0,135.4977,34.6963],[0,0,0]]]"
-)
-
-
-class HtmlParseTest(unittest.TestCase):
-    def test_staticmap_center(self):
-        self.assertEqual(marker.parse_coords_from_html(MOBILE_HTML), (34.6963, 135.4977))
-
-    def test_app_state_is_lng_lat(self):
-        page = ";window.APP_INITIALIZATION_STATE=[[[1234.5,135.4977,34.6963],[0,0,0]]]"
-        self.assertEqual(marker.parse_coords_from_html(page), (34.6963, 135.4977))
-
-    def test_name_from_meta(self):
-        self.assertEqual(marker.parse_name_from_html(MOBILE_HTML), "와타나베카레")
-        self.assertIsNone(marker.parse_name_from_html('<meta content="Google Maps" property="og:title">'))
-
-
 class AddTest(unittest.TestCase):
-    def test_mobile_link_uses_html(self):
-        with TemporaryDirectory() as d, mock.patch.object(marker, "fetch", return_value=(MOBILE_URL, MOBILE_HTML)):
+    def test_mobile_link_without_coords_fails(self):
+        # 모바일 공유 링크는 좌표가 없다. 페이지 HTML에 뭐가 있든 추측해서 넣으면 안 된다.
+        page = ";window.APP_INITIALIZATION_STATE=[[[3000.0,127.1365632,35.8486769]]]"
+        with TemporaryDirectory() as d, mock.patch.object(marker, "fetch", return_value=(MOBILE_URL, page)):
             path = Path(d) / "places.csv"
-            self.assertTrue(marker.add("https://maps.app.goo.gl/NEecvr66Yyj8yvus6", path)[0])
-            row = marker.load_rows(path)[0]
-            self.assertEqual((row["이름"], row["위도"], row["경도"]), ("와타나베카레", "34.6963", "135.4977"))
+            ok, message = marker.add("https://maps.app.goo.gl/NEecvr66Yyj8yvus6", path)
+            self.assertFalse(ok)
+            self.assertIn("좌표를 찾지 못했습니다", message)
+            self.assertFalse(path.exists())
 
     def test_add_and_skip_duplicate(self):
         with TemporaryDirectory() as d:

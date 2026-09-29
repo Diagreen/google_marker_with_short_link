@@ -2,7 +2,6 @@
 
 import argparse
 import csv
-import html
 import re
 import sys
 import urllib.request
@@ -46,29 +45,6 @@ def parse_coords(url: str) -> tuple[float, float] | None:
     if m:
         return float(m[1]), float(m[2])
     return None
-
-
-def parse_coords_from_html(page: str) -> tuple[float, float] | None:
-    """모바일 공유 링크처럼 URL에 좌표가 없을 때, 페이지 HTML에 박힌 좌표를 찾는다."""
-    # 미리보기 이미지(staticmap)의 center=lat,lng
-    m = re.search(rf"staticmap\?center={COORD}(?:%2C|,){COORD}", page)
-    if m:
-        return float(m[1]), float(m[2])
-    # APP_INITIALIZATION_STATE=[[[zoom,lng,lat] (경도가 먼저)
-    m = re.search(rf"APP_INITIALIZATION_STATE=\[\[\[-?[\d.]+,{COORD},{COORD}\]", page)
-    if m:
-        return float(m[2]), float(m[1])
-    return None
-
-
-def parse_name_from_html(page: str) -> str | None:
-    m = re.search(r'<meta content="([^"]*)" (?:itemprop="name"|property="og:title")', page) or \
-        re.search(r'<meta (?:itemprop="name"|property="og:title") content="([^"]*)"', page)
-    if not m:
-        return None
-    # "이름 · 주소" 형태로 오므로 앞부분만 쓴다.
-    name = html.unescape(m[1]).split(" · ")[0].strip()
-    return name if name and name != "Google Maps" else None
 
 
 def parse_name(url: str) -> str | None:
@@ -118,7 +94,9 @@ def add(url: str, csv_path: Path, name: str | None = None, note: str = "", tag: 
             final, page = fetch(url)
         except OSError as e:
             return False, f"[실패] 링크를 열 수 없습니다: {url} ({e})"
-        coords = parse_coords(final) or parse_coords_from_html(page)
+        # 모바일 공유 링크는 좌표 없이 장소 ID만 담고 있다. 페이지 HTML의 좌표는 접속자 IP
+        # 기준 위치라 쓰면 안 된다(실제로 전혀 다른 곳이 찍혔다).
+        coords = parse_coords(final)
         if debug:
             Path("debug.html").write_text(page, encoding="utf-8")
             log = f"[디버그] 최종 URL: {final}\n[디버그] HTML을 debug.html에 저장했습니다.\n"
@@ -130,7 +108,7 @@ def add(url: str, csv_path: Path, name: str | None = None, note: str = "", tag: 
             "  (--debug 옵션으로 실행하면 받은 HTML을 debug.html에 저장합니다.)"
         )
     lat, lng = coords
-    name = name or parse_name_from_html(page) or parse_name(final) or f"{lat:.5f},{lng:.5f}"
+    name = name or parse_name(final) or f"{lat:.5f},{lng:.5f}"
 
     dup = is_duplicate(load_rows(csv_path), lat, lng)
     if dup:
