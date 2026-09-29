@@ -57,11 +57,19 @@ PAGE = """<!doctype html>
 """
 
 
+def place_link(row: dict) -> str:
+    """원본 공유 링크(시설 페이지로 열림)를 우선하고, 없으면 좌표로 연다."""
+    link = row.get("링크", "")
+    if link.startswith(("https://", "http://")):
+        return link
+    return f"https://www.google.com/maps/search/?api=1&query={row['위도']},{row['경도']}"
+
+
 def render(result: str = "", failed: bool = False) -> bytes:
     rows = marker.load_rows(CSV_PATH)
     tags = sorted({r.get("태그", "") for r in rows} - {""})
     table = "\n".join(
-        f'<tr><td><a href="https://www.google.com/maps/search/?api=1&query={escape(r["위도"])},{escape(r["경도"])}"'
+        f'<tr><td><a href="{escape(place_link(r))}"'
         f' target="_blank">{escape(r["이름"])}</a></td>'
         f'<td>{escape(r.get("태그", ""))}</td><td>{escape(r.get("메모", ""))}</td>'
         f'<td class="muted">{escape(r.get("추가일", ""))}</td></tr>'
