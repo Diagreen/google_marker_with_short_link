@@ -63,27 +63,36 @@ class AddTest(unittest.TestCase):
     def test_mobile_link_uses_html(self):
         with TemporaryDirectory() as d, mock.patch.object(marker, "fetch", return_value=(MOBILE_URL, MOBILE_HTML)):
             path = Path(d) / "places.csv"
-            self.assertTrue(marker.add("https://maps.app.goo.gl/NEecvr66Yyj8yvus6", path, None, ""))
+            self.assertTrue(marker.add("https://maps.app.goo.gl/NEecvr66Yyj8yvus6", path)[0])
             row = marker.load_rows(path)[0]
             self.assertEqual((row["이름"], row["위도"], row["경도"]), ("와타나베카레", "34.6963", "135.4977"))
 
     def test_add_and_skip_duplicate(self):
         with TemporaryDirectory() as d:
             path = Path(d) / "places.csv"
-            self.assertTrue(marker.add(PLACE_URL, path, None, "첫 방문"))
-            self.assertTrue(marker.add(PLACE_URL, path, None, ""))
+            self.assertTrue(marker.add(PLACE_URL, path, note="첫 방문", tag="명소/절")[0])
+            ok, message = marker.add(PLACE_URL, path)
+            self.assertTrue(ok)
+            self.assertIn("건너뜀", message)
             rows = marker.load_rows(path)
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["이름"], "금각사")
             self.assertEqual(rows[0]["메모"], "첫 방문")
+            self.assertEqual(rows[0]["태그"], "명소/절")
             self.assertTrue(path.read_bytes().startswith(b"\xef\xbb\xbf"))
 
     def test_missing_coords_fails(self):
         url = "https://www.google.com/maps/place/Somewhere/"
         with TemporaryDirectory() as d, mock.patch.object(marker, "fetch", return_value=(url, "<html></html>")):
             path = Path(d) / "places.csv"
-            self.assertFalse(marker.add(url, path, None, ""))
+            self.assertFalse(marker.add(url, path)[0])
             self.assertFalse(path.exists())
+
+    def test_fetch_error_is_reported(self):
+        with TemporaryDirectory() as d, mock.patch.object(marker, "fetch", side_effect=OSError("timeout")):
+            ok, message = marker.add("https://maps.app.goo.gl/x", Path(d) / "places.csv")
+            self.assertFalse(ok)
+            self.assertIn("timeout", message)
 
 
 if __name__ == "__main__":

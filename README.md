@@ -6,17 +6,27 @@
 
 Python 3.10 이상, 표준 라이브러리만 사용합니다.
 
-## 사용법
+## 웹 UI
+
+```bash
+python webui.py
+```
+
+브라우저가 `http://127.0.0.1:8000/` 로 열립니다. 링크를 한 줄에 하나씩 붙여 넣고 **추가**를 누르면 됩니다.
+태그·메모는 입력한 링크 전체에 같이 적용되고, 태그 칸은 기존에 쓴 태그를 자동완성으로 보여 줍니다.
+옵션: `--port 8080`, `--csv kyoto.csv`, `--no-browser`
+
+## CLI
 
 ```bash
 python marker.py https://maps.app.goo.gl/XXXX
 python marker.py https://maps.app.goo.gl/AAAA https://maps.app.goo.gl/BBBB
-python marker.py https://maps.app.goo.gl/XXXX --name "금각사" --note "오전에 가면 한산"
+python marker.py https://maps.app.goo.gl/XXXX --name "금각사" --tag "명소/절" --note "오전에 가면 한산"
 python marker.py https://maps.app.goo.gl/XXXX --csv kyoto.csv
 ```
 
 - 좌표가 같은 장소는 중복으로 보고 건너뜁니다.
-- `태그` 열은 비어 있습니다. 직접 채우세요.
+- `태그`는 `--tag`로 넣거나, 나중에 CSV에서 직접 채우세요.
 - 좌표를 못 찾으면 PC 브라우저에서 링크를 열고, 지도가 로드된 뒤 주소창 URL을 복사해 다시 넣으세요.
 
 CSV 열: `이름, 위도, 경도, 태그, 메모, 링크, 추가일`

@@ -108,38 +108,39 @@ def is_duplicate(rows: list[dict], lat: float, lng: float) -> dict | None:
     return None
 
 
-def add(url: str, csv_path: Path, name: str | None, note: str, debug: bool = False) -> bool:
-    final, page = url, ""
+def add(url: str, csv_path: Path, name: str | None = None, note: str = "", tag: str = "",
+        debug: bool = False) -> tuple[bool, str]:
+    """링크 하나를 CSV에 추가하고 (성공 여부, 결과 메시지)를 반환한다."""
+    final, page, log = url, "", ""
     coords = parse_coords(url)
     if coords is None:
-        final, page = fetch(url)
+        try:
+            final, page = fetch(url)
+        except OSError as e:
+            return False, f"[실패] 링크를 열 수 없습니다: {url} ({e})"
         coords = parse_coords(final) or parse_coords_from_html(page)
         if debug:
             Path("debug.html").write_text(page, encoding="utf-8")
-            print(f"[디버그] 최종 URL: {final}\n[디버그] HTML을 debug.html에 저장했습니다.")
+            log = f"[디버그] 최종 URL: {final}\n[디버그] HTML을 debug.html에 저장했습니다.\n"
     if coords is None:
-        print(
+        return False, log + (
             f"[실패] 좌표를 찾지 못했습니다: {url}\n"
             f"  최종 URL: {final}\n"
             "  PC 브라우저에서 링크를 열고, 지도가 로드된 뒤 주소창의 URL을 복사해 다시 넣어 주세요.\n"
-            "  (--debug 옵션으로 실행하면 받은 HTML을 debug.html에 저장합니다.)",
-            file=sys.stderr,
+            "  (--debug 옵션으로 실행하면 받은 HTML을 debug.html에 저장합니다.)"
         )
-        return False
     lat, lng = coords
     name = name or parse_name_from_html(page) or parse_name(final) or f"{lat:.5f},{lng:.5f}"
 
     dup = is_duplicate(load_rows(csv_path), lat, lng)
     if dup:
-        print(f"[건너뜀] 이미 있는 장소입니다: {dup['이름']} ({lat}, {lng})")
-        return True
+        return True, log + f"[건너뜀] 이미 있는 장소입니다: {dup['이름']} ({lat}, {lng})"
 
     append_row(csv_path, {
-        "이름": name, "위도": lat, "경도": lng, "태그": "", "메모": note,
+        "이름": name, "위도": lat, "경도": lng, "태그": tag, "메모": note,
         "링크": url, "추가일": date.today().isoformat(),
     })
-    print(f"[추가] {name} ({lat}, {lng})")
-    return True
+    return True, log + f"[추가] {name} ({lat}, {lng})"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -148,20 +149,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--csv", type=Path, default=Path("places.csv"), help="저장할 CSV (기본: places.csv)")
     parser.add_argument("--name", help="장소 이름 직접 지정 (링크 1개일 때만)")
     parser.add_argument("--note", default="", help="메모")
+    parser.add_argument("--tag", default="", help="태그")
     parser.add_argument("--debug", action="store_true", help="받은 페이지 HTML을 debug.html에 저장")
     args = parser.parse_args(argv)
 
     if args.name and len(args.urls) > 1:
         parser.error("--name은 링크가 1개일 때만 쓸 수 있습니다.")
 
-    ok = True
+    all_ok = True
     for url in args.urls:
-        try:
-            ok &= add(url, args.csv, args.name, args.note, args.debug)
-        except OSError as e:
-            print(f"[실패] 링크를 열 수 없습니다: {url} ({e})", file=sys.stderr)
-            ok = False
-    return 0 if ok else 1
+        ok, message = add(url, args.csv, args.name, args.note, args.tag, args.debug)
+        print(message, file=sys.stdout if ok else sys.stderr)
+        all_ok &= ok
+    return 0 if all_ok else 1
 
 
 if __name__ == "__main__":
